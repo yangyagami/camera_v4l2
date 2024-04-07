@@ -1,0 +1,5 @@
+/home/yangsiyu/Workspace/camera_v4l2/qt_test/build/CMakeFiles/test.dir
+/home/yangsiyu/Workspace/camera_v4l2/qt_test/build/CMakeFiles/edit_cache.dir
+/home/yangsiyu/Workspace/camera_v4l2/qt_test/build/CMakeFiles/rebuild_cache.dir
+/home/yangsiyu/Workspace/camera_v4l2/qt_test/build/CMakeFiles/test_autogen_timestamp_deps.dir
+/home/yangsiyu/Workspace/camera_v4l2/qt_test/build/CMakeFiles/test_autogen.dir

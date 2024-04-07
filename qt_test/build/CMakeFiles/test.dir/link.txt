@@ -1,0 +1,1 @@
+/usr/bin/c++ -rdynamic CMakeFiles/test.dir/test_autogen/mocs_compilation.cpp.o CMakeFiles/test.dir/main.cc.o CMakeFiles/test.dir/mainwindow.cc.o -o test  /usr/lib/libQt5Widgets.so.5.15.13 /usr/lib/libQt5Gui.so.5.15.13 /usr/lib/libQt5Core.so.5.15.13
