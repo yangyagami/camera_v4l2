@@ -5,7 +5,10 @@
 extern "C" {
 #endif
 
-struct camera_v4l2_buffer;
+struct camera_v4l2_buffer {
+	void *start;
+	size_t length;
+};
 typedef struct camera_v4l2_buffer camera_v4l2_buffer_t;
 
 enum camera_v4l2_frame_format {
@@ -56,11 +59,6 @@ extern "C" {
 #include <sys/mman.h>
 
 #define	CAMERA_V4L2_BUFFER_COUNT (4)
-
-struct camera_v4l2_buffer {
-	void *start;
-	size_t length;
-};
 
 struct camera_v4l2_camera {
 	int fd;
