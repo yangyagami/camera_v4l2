@@ -15,6 +15,11 @@ int main() {
 
 	camera_v4l2_open(camera, 2, &param);
 
+	if (camera_v4l2_isopened(camera) == 0) {
+		printf(":(\n");
+		std::terminate();
+	}
+
 	int count = 0;
 
 	while (count < 240) {

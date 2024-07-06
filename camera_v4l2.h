@@ -32,6 +32,7 @@ void camera_v4l2_destroy(camera_v4l2_camera_t *camera);
 
 int camera_v4l2_open(camera_v4l2_camera_t *camera,
 		     int index, camera_v4l2_param_t *param);
+int camera_v4l2_isopened(camera_v4l2_camera_t *camera);
 void camera_v4l2_close(camera_v4l2_camera_t *camera);
 int camera_v4l2_read(camera_v4l2_camera_t *camera,
 		     camera_v4l2_buffer_t *frame);
@@ -62,17 +63,22 @@ extern "C" {
 
 struct camera_v4l2_camera {
 	int fd;
+	uint8_t opened;
 	camera_v4l2_buffer_t *buf;
 };
 
 static int camera_v4l2_io_control(camera_v4l2_camera_t *camera, int request,
 				   void *output) {
-	assert(camera != NULL && "Object is null!!!");    
+	assert(camera != NULL && "Object is null!!!");
 
 ioctl_retry:
 	int ret = ioctl(camera->fd, request, output);
 	if (ret >= 0) return 1;
 	if (errno != EINPROGRESS && errno != EAGAIN && errno != EBUSY) {
+		if (errno == EBADF) {
+			camera->opened = 0;
+			camera_v4l2_close(camera);
+		}
 		fprintf(stderr, "ioctl failed: %s\n", strerror(errno));
 		return 0;
 	} else {
@@ -127,7 +133,7 @@ static void camera_v4l2_query_frame_interval(
 	struct v4l2_frmivalenum frmival;
 	frmival.index = 0;
 	frmival.pixel_format = pixelfmt;
-	frmival.width = width; 
+	frmival.width = width;
 	frmival.height = height;
 
 	while (camera_v4l2_io_control(camera, VIDIOC_ENUM_FRAMEINTERVALS,
@@ -241,7 +247,7 @@ static int camera_v4l2_request_buffers(camera_v4l2_camera_t *camera) {
 		sizeof(*camera->buf));
 
 	for (size_t i = 0; i < reqbufs.count; i++) {
-		struct v4l2_buffer tmp;		
+		struct v4l2_buffer tmp;
 		tmp.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 		tmp.memory = V4L2_MEMORY_MMAP;
 		tmp.index = i;
@@ -259,7 +265,7 @@ static int camera_v4l2_request_buffers(camera_v4l2_camera_t *camera) {
 			camera->fd,
 			tmp.m.offset);
 		if (camera->buf[i].start == MAP_FAILED) {
-			fprintf(stderr, "Map buffer failed\n");	
+			fprintf(stderr, "Map buffer failed\n");
 			return 0;
 		}
 	}
@@ -315,11 +321,14 @@ int camera_v4l2_open(camera_v4l2_camera_t *camera,
 	sprintf(path, "/dev/video%d", index);
 	camera->fd = open(path, O_RDWR | O_NONBLOCK);
 	if (camera->fd < 0) {
+		camera->opened = 0;
 		camera->fd = -1;
-		fprintf(stderr, "Cannot open: %s\n, err: %s", path,
+		fprintf(stderr, "Cannot open: %s, err: %s\n", path,
 			strerror(errno));
 		return 0;
 	}
+
+	camera->opened = 1;
 
 	printf("Open %s success\n", path);
 
@@ -340,6 +349,7 @@ void camera_v4l2_close(camera_v4l2_camera_t *camera) {
 	assert(camera != NULL && "Object is null!!!");
 
 	if (camera->fd != -1) {
+		camera->opened = 0;
 		close(camera->fd);
 	}
 }
@@ -364,6 +374,11 @@ int camera_v4l2_read(camera_v4l2_camera_t *camera,
 	}
 
 	return 1;
+}
+
+int camera_v4l2_isopened(camera_v4l2_camera_t *camera) {
+	assert(camera != NULL && "Object is null!!!");
+	return camera->opened;
 }
 
 #undef CAMERA_V4L2_BUFFER_COUNT
