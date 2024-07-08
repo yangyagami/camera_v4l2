@@ -75,7 +75,8 @@ ioctl_retry:
 	int ret = ioctl(camera->fd, request, output);
 	if (ret >= 0) return 1;
 	if (errno != EINPROGRESS && errno != EAGAIN && errno != EBUSY) {
-		if (errno == EBADF || errno == ENOENT || errno == ENODEV) {
+		if (errno == EBADF || errno == ENOENT ||
+		    errno == ENODEV || errno == EPIPE) {
 			camera->opened = 0;
 			camera_v4l2_close(camera);
 		}
