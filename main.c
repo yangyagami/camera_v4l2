@@ -13,17 +13,22 @@ int main() {
 	param.frame_height = 480;
 	param.fmt = MJPEG;
 
-	camera_v4l2_open(camera, 2, &param);
+	camera_v4l2_open(camera, 0, &param);
 
 	if (camera_v4l2_isopened(camera) == 0) {
 		printf(":(\n");
 		std::terminate();
 	}
 
-	int count = 0;
-
-	while (count < 240) {
+	while (true) {
 		camera_v4l2_buffer_t frame;
+
+		if (camera_v4l2_isopened(camera) == 0) {
+			printf("Camera disconnected!\n");
+			sleep(2);
+			camera_v4l2_open(camera, 0, &param);
+			continue;
+		}
 
 		[[maybe_unused]]
 		int ret = camera_v4l2_read(camera, &frame);
@@ -32,9 +37,9 @@ int main() {
 			cv::imshow("frame", f);
 		}
 
-		count++;
-
-		cv::waitKey(5);
+		if (cv::waitKey(5) >= 0) {
+			break;
+		}
 	}
 
 	// TODO: should destroy window. Never mind :).

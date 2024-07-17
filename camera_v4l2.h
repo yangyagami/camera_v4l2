@@ -38,12 +38,16 @@ int camera_v4l2_read(camera_v4l2_camera_t *camera,
 		     camera_v4l2_buffer_t *frame);
 
 #ifdef __cpluscplus
-extern "C" {
+}
 #endif
 
 #endif  // CAMERA_V4L2_H_
 
 #ifdef CAMERA_V4L2_IMPLEMENTATION
+
+#ifdef __cpluscplus
+extern "C" {
+#endif
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -59,17 +63,41 @@ extern "C" {
 #include <sys/fcntl.h>
 #include <sys/mman.h>
 
-#define	CAMERA_V4L2_BUFFER_COUNT (4)
+#define	CAMERA_V4L2_BUFFER_COUNT (12)
+#define CAMERA_V4L2_ASSERT(cond, msg) \
+do { \
+	if (!(cond)) { \
+		fprintf(stderr, "\x1B[31m Assert failed: [%s][%d] %s \e[0m\n", __FUNCTION__, __LINE__, msg); \
+		exit(1); \
+	} \
+} while(0)
+
+#define CAMERA_V4L2_LOG_ERROR(msg, ...)	\
+do { \
+	fprintf(stderr, "\x1B[31mERROR: [%s][%d] " msg "\e[0m\n", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+} while(0)
+
+#define CAMERA_V4L2_LOG_INFO(msg, ...)	\
+do { \
+	fprintf(stdout, "INFO: [%s][%d] " msg "\n", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+} while(0)
+
+#define CAMERA_V4L2_LOG_WARN(msg, ...)	\
+do { \
+	fprintf(stderr, "\x1B[32mWARN: [%s][%d] " msg "\e[0m\n", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+} while(0)
 
 struct camera_v4l2_camera {
+	int streaming;
 	int fd;
-	uint8_t opened;
 	camera_v4l2_buffer_t *buf;
 };
 
 static int camera_v4l2_io_control(camera_v4l2_camera_t *camera, int request,
 				   void *output) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
+
+	if (camera->fd == -1) return 0;
 
 ioctl_retry:
 	int ret = ioctl(camera->fd, request, output);
@@ -77,10 +105,10 @@ ioctl_retry:
 	if (errno != EINPROGRESS && errno != EAGAIN && errno != EBUSY) {
 		if (errno == EBADF || errno == ENOENT ||
 		    errno == ENODEV || errno == EPIPE) {
-			camera->opened = 0;
+			camera->streaming = 0;  // If camera disconnected, the streaming should be 0.
 			camera_v4l2_close(camera);
 		}
-		fprintf(stderr, "ioctl failed: %s\n", strerror(errno));
+		CAMERA_V4L2_LOG_ERROR("ioctl failed: %s", strerror(errno));
 		return 0;
 	} else {
 		fd_set fdset;
@@ -94,7 +122,7 @@ ioctl_retry:
 		if (select_ret > 0) {
 			goto ioctl_retry;
 		} else {
-			fprintf(stderr, "select failed: %s\n", strerror(errno));
+			CAMERA_V4L2_LOG_ERROR("select failed: %s", strerror(errno));
 			return 0;
 		}
 	}
@@ -102,34 +130,12 @@ ioctl_retry:
 	return 1;
 }
 
-static void camera_v4l2_query_capability(camera_v4l2_camera_t *camera) {
-	assert(camera != NULL && "Object is null!!!");
-
-	struct v4l2_capability capability;
-
-	if (camera_v4l2_io_control(camera, VIDIOC_QUERYCAP, &capability) == 0) {
-		fprintf(stderr, "Query capability failed\n");
-		return;
-	}
-
-	printf(
-	       "Driver name: %s\n"
-	       "Device name: %s\n"
-	       "Bus info: %s\n"
-	       "Version: %d\n\n",
-	       capability.driver,
-	       capability.card,
-	       capability.bus_info,
-	       capability.version
-	);
-}
-
 static void camera_v4l2_query_frame_interval(
 	camera_v4l2_camera_t *camera,
 	uint32_t pixelfmt,
 	int width,
 	int height) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
 
 	struct v4l2_frmivalenum frmival;
 	frmival.index = 0;
@@ -139,7 +145,7 @@ static void camera_v4l2_query_frame_interval(
 
 	while (camera_v4l2_io_control(camera, VIDIOC_ENUM_FRAMEINTERVALS,
 				      &frmival)) {
-		printf(
+		CAMERA_V4L2_LOG_INFO(
 		       "%d/%d ",
 		       frmival.discrete.numerator,
 		       frmival.discrete.denominator
@@ -147,12 +153,12 @@ static void camera_v4l2_query_frame_interval(
 
 		frmival.index++;
 	}
-	printf("\n");
+	CAMERA_V4L2_LOG_INFO("\n");
 }
 
 static void camera_v4l2_query_frame_size(camera_v4l2_camera_t *camera,
 					 uint32_t pixelfmt) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
 
 	struct v4l2_frmsizeenum frmsize;
 	frmsize.pixel_format = pixelfmt;
@@ -160,7 +166,7 @@ static void camera_v4l2_query_frame_size(camera_v4l2_camera_t *camera,
 
 	while (camera_v4l2_io_control(camera, VIDIOC_ENUM_FRAMESIZES,
 				      &frmsize)) {
-		printf(
+		CAMERA_V4L2_LOG_INFO(
 		       "width: %d, height: %d, fps: ",
 		       frmsize.discrete.width,
 		       frmsize.discrete.height
@@ -170,18 +176,18 @@ static void camera_v4l2_query_frame_size(camera_v4l2_camera_t *camera,
 
 		frmsize.index++;
 	}
-	printf("\n");
+	CAMERA_V4L2_LOG_INFO("\n");
 }
 
 static void camera_v4l2_query_fmt_desc(camera_v4l2_camera_t *camera) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
 
 	struct v4l2_fmtdesc fmtdesc;
 	fmtdesc.index = 0;
 	fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
 	while (camera_v4l2_io_control(camera, VIDIOC_ENUM_FMT, &fmtdesc)) {
-		printf(
+		CAMERA_V4L2_LOG_INFO(
 		       "Format: %c %c %c %c\n"
 		       "Format description: %s\n",
         	       fmtdesc.pixelformat & 0xFF,
@@ -198,17 +204,36 @@ static void camera_v4l2_query_fmt_desc(camera_v4l2_camera_t *camera) {
 
 }
 
-static void camera_v4l2_query_info(camera_v4l2_camera_t *camera) {
-	assert(camera != NULL && "Object is null!!!");
+static int camera_v4l2_query_info(camera_v4l2_camera_t *camera) {
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
 
-	camera_v4l2_query_capability(camera);
+	struct v4l2_capability capability;
+
+	if (camera_v4l2_io_control(camera, VIDIOC_QUERYCAP, &capability) == 0) {
+		CAMERA_V4L2_LOG_ERROR("Query capability failed\n");
+		return 0;
+	}
+
+	CAMERA_V4L2_LOG_INFO(
+	       "Driver name: %s\n"
+	       "Device name: %s\n"
+	       "Bus info: %s\n"
+	       "Version: %d\n\n",
+	       capability.driver,
+	       capability.card,
+	       capability.bus_info,
+	       capability.version
+	);
+
 	camera_v4l2_query_fmt_desc(camera);
+
+	return 1;
 }
 
-static void camera_v4l2_set_param(
+static int camera_v4l2_set_param(
 	camera_v4l2_camera_t *camera,
 	camera_v4l2_param_t *param) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
 
 	struct v4l2_format fmt;
     	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -225,13 +250,11 @@ static void camera_v4l2_set_param(
 		}
 	}
 
-	if (!camera_v4l2_io_control(camera, VIDIOC_S_FMT, &fmt)) {
-		fprintf(stderr, "Cannot set param!\n");
-	}
+	return camera_v4l2_io_control(camera, VIDIOC_S_FMT, &fmt);
 }
 
 static int camera_v4l2_request_buffers(camera_v4l2_camera_t *camera) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
 
 	struct v4l2_requestbuffers reqbufs;
 	reqbufs.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -239,7 +262,7 @@ static int camera_v4l2_request_buffers(camera_v4l2_camera_t *camera) {
 	reqbufs.count = CAMERA_V4L2_BUFFER_COUNT;
 
 	if (!camera_v4l2_io_control(camera, VIDIOC_REQBUFS, &reqbufs)) {
-		fprintf(stderr, "Request buffer failed\n");
+		CAMERA_V4L2_LOG_ERROR("Request buffer failed");
 		return 0;
 	}
 
@@ -254,7 +277,7 @@ static int camera_v4l2_request_buffers(camera_v4l2_camera_t *camera) {
 		tmp.index = i;
 
 		if (!camera_v4l2_io_control(camera, VIDIOC_QUERYBUF, &tmp)) {
-			fprintf(stderr, "Failed to query buffer\n");
+			CAMERA_V4L2_LOG_ERROR("Failed to query buffer");
 			return 0;
 		}
 		camera->buf[i].length = tmp.length;
@@ -266,7 +289,7 @@ static int camera_v4l2_request_buffers(camera_v4l2_camera_t *camera) {
 			camera->fd,
 			tmp.m.offset);
 		if (camera->buf[i].start == MAP_FAILED) {
-			fprintf(stderr, "Map buffer failed\n");
+			CAMERA_V4L2_LOG_ERROR("Map buffer failed");
 			return 0;
 		}
 	}
@@ -281,17 +304,26 @@ static int camera_v4l2_stream_on(camera_v4l2_camera_t *camera) {
 		buf.memory = V4L2_MEMORY_MMAP;
 		buf.index = i;
 		if (!camera_v4l2_io_control(camera, VIDIOC_QBUF, &buf)) {
-		    fprintf(stderr, "Failed to queue buffer\n");
-		    return 0;
+			CAMERA_V4L2_LOG_ERROR("Failed to queue buffer");
+			return 0;
 		}
 	}
 
 	enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	if (!camera_v4l2_io_control(camera, VIDIOC_STREAMON, &type)) {
-	    fprintf(stderr, "Failed to start capture\n");
-	    return 0;
+		CAMERA_V4L2_LOG_ERROR("Failed to start capture");
+		return 0;
 	}
 
+	return 1;
+}
+
+static int camera_v4l2_stream_off(camera_v4l2_camera_t *camera) {
+	enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	if (!camera_v4l2_io_control(camera, VIDIOC_STREAMOFF, &type)) {
+		CAMERA_V4L2_LOG_ERROR("Failed to close capture");
+		return 0;
+	}
 	return 1;
 }
 
@@ -305,7 +337,7 @@ camera_v4l2_camera_t *camera_v4l2_create() {
 }
 
 void camera_v4l2_destroy(camera_v4l2_camera_t *camera) {
-	assert(camera != NULL && "Object is NULL!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is NULL!!!");
 
 	camera_v4l2_close(camera);
 
@@ -316,53 +348,100 @@ void camera_v4l2_destroy(camera_v4l2_camera_t *camera) {
 
 int camera_v4l2_open(camera_v4l2_camera_t *camera,
 		     int index, camera_v4l2_param_t *param) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is NULL!!!");
 
 	char path[32] = { 0 };
 	sprintf(path, "/dev/video%d", index);
 	camera->fd = open(path, O_RDWR | O_NONBLOCK);
 	if (camera->fd < 0) {
-		camera->opened = 0;
 		camera->fd = -1;
-		fprintf(stderr, "Cannot open: %s, err: %s\n", path,
-			strerror(errno));
+		CAMERA_V4L2_LOG_ERROR("Cannot open: %s, err: %s",
+				      path, strerror(errno));
 		return 0;
 	}
 
-	camera->opened = 1;
+	CAMERA_V4L2_LOG_INFO("Open %s success", path);
 
-	printf("Open %s success\n", path);
-
-	camera_v4l2_query_info(camera);
+	if (!camera_v4l2_query_info(camera)) {
+		CAMERA_V4L2_LOG_ERROR("Cannot query info!");
+		goto failed;
+	}
 
 	if (param != NULL) {
-		camera_v4l2_set_param(camera, param);
+		if (!camera_v4l2_set_param(camera, param)) {
+			CAMERA_V4L2_LOG_ERROR("Cannot set param!");
+			goto failed;
+		}
 	}
 
 	if (!camera_v4l2_request_buffers(camera)) {
-		fprintf(stderr, "Cannot request buffer!");
+		CAMERA_V4L2_LOG_ERROR("Cannot request buffer!");
+		goto failed;
 	}
 
-	return camera_v4l2_stream_on(camera);
+        if (!camera_v4l2_stream_on(camera)) {
+		CAMERA_V4L2_LOG_ERROR("Open stream failed!");
+		goto failed;
+	}
+
+	camera->streaming = 1;
+
+	return 1;
+
+failed:
+	camera_v4l2_close(camera);
+	return 0;
 }
 
 void camera_v4l2_close(camera_v4l2_camera_t *camera) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null");
 
 	if (camera->fd != -1) {
-		camera->opened = 0;
+		if (camera->streaming) {
+			if (camera_v4l2_stream_off(camera)) {
+				CAMERA_V4L2_LOG_INFO("Stream closed");
+			} else {
+				CAMERA_V4L2_LOG_ERROR("Stream close failed!");
+			}
+		}
+		if (camera->buf != NULL) {
+			for (int i = 0; i < CAMERA_V4L2_BUFFER_COUNT; i++) {
+				if (camera->buf[i].length != 0 &&
+				    camera->buf[i].start != NULL) {
+					munmap(camera->buf[i].start,
+					       camera->buf[i].length);
+
+					camera->buf[i].start = NULL;
+					camera->buf[i].length = 0;
+				}
+			}
+
+			free(camera->buf);
+
+			camera->buf = NULL;
+		}
+
 		close(camera->fd);
+		camera->fd = -1;
+		camera->streaming = 0;
+
+		CAMERA_V4L2_LOG_INFO("Camera closed");
 	}
 }
 
 int camera_v4l2_read(camera_v4l2_camera_t *camera,
 		     camera_v4l2_buffer_t *frame) {
-	assert(camera != NULL && "Object is null!!!");
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
+
+	if (camera->fd == -1) {
+		CAMERA_V4L2_LOG_ERROR("Invalid fd, do nothing");
+		return 0;
+	}
 
 	struct v4l2_buffer buf;
 	buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	if (!camera_v4l2_io_control(camera, VIDIOC_DQBUF, &buf)) {
-		fprintf(stderr, "Dequeue buffer failed\n");
+		CAMERA_V4L2_LOG_ERROR("Dequeue buffer failed");
 		return 0;
 	}
 
@@ -370,7 +449,7 @@ int camera_v4l2_read(camera_v4l2_camera_t *camera,
 	frame->length = buf.bytesused;
 
 	if (!camera_v4l2_io_control(camera, VIDIOC_QBUF, &buf)) {
-		fprintf(stderr, "Queue buffer failed\n");
+		CAMERA_V4L2_LOG_ERROR("Queue buffer failed");
 		return 0;
 	}
 
@@ -378,10 +457,18 @@ int camera_v4l2_read(camera_v4l2_camera_t *camera,
 }
 
 int camera_v4l2_isopened(camera_v4l2_camera_t *camera) {
-	assert(camera != NULL && "Object is null!!!");
-	return camera->opened;
+	CAMERA_V4L2_ASSERT(camera != NULL, "Object is null!!!");
+	return camera->fd != -1 && camera->streaming;
 }
 
 #undef CAMERA_V4L2_BUFFER_COUNT
+#undef CAMERA_V4L2_ASSERT
+#undef CAMERA_V4L2_LOG_ERROR
+#undef CAMERA_V4L2_LOG_INFO
+#undef CAMERA_V4L2_LOG_WARN
+
+#ifdef __cpluscplus
+}
+#endif
 
 #endif  // CAMERA_V4L2_IMPLEMENTATION
